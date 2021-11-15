@@ -458,10 +458,14 @@ filter_df <- filtrado_df(df_final, 'Spain')
 
 
 ```{r}
-modelo_df <- function(filter_df) {
+modelo_df <- function(filter_df, x_col='Time') {
 locaion <- filter_df$location[1]
-model <- gam(frequency~s(Time), data = filter_df, method = "REML")
-model_p <- tidymv::predict_gam(model, length_out = 30 , values = list(x0=list(filter_df$Time)))
+if (x_col == "Time") {
+  model <- gam(frequency~s(Time), data = filter_df, method = "REML")
+  model_p <- tidymv::predict_gam(model, length_out = 30 , values = list(x0=list(filter_df$Time)))
+} else if (x_col == "Prop") 
+  model <- gam(frequency~s(people_vaccinated_per_hundred), data = filter_df, method = "REML")
+  model_p <- tidymv::predict_gam(model, length_out = 30 , values = list(x0=list(filter_df$people_vaccinated_per_hundred)))
 modelos <- list(model = model, 
                 model_p = model_p)
 model_p$location <- locaion 
@@ -506,7 +510,8 @@ plot_country(df_final,'Czechia')
 
 ```{r}
 countries <- unique(df_final$location)
-countries <- countries[1:10]
+countries <- countries[1:10] #[1:19]
+# countries <- c('Spain', 'United Kingdom', 'United States')
 filter_dfs <- list()
 i = 1
 for (country in countries) {
@@ -522,7 +527,33 @@ actual_final_df <- actual_final_df %>% tidyr::drop_na(location)
 p <- actual_final_df %>%
   ggplot2::ggplot(ggplot2::aes(Time, fit, color=location)) +
   tidymv::geom_smooth_ci()+
-  ggplot2::geom_point(ggplot2::aes(Time,frequency, color=location))
-plotly::ggplotly(p)
+  ggplot2::geom_point(ggplot2::aes(Time,frequency, color=location)) +
+  ggplot2::theme_minimal() + 
+  ggplot2::labs(x = "Time", y = "Frequency of Variant S.E484")
+plotly::ggplotly(p) # , width=600, height=400
+```
 
+```{r}
+countries <- unique(df_final$location)
+countries <- countries[1:10] #[1:19]
+# countries <- c('Spain', 'United Kingdom', 'United States')
+filter_dfs <- list()
+i = 1
+for (country in countries) {
+  filter_df <- filtrado_df(df_final,country)
+  new <- modelo_df(filter_df, x_col='Prop')
+  filter_dfs[[country]] <- as.data.frame(new)
+  i <- i + 1
+}
+
+actual_final_df <- do.call("rbind", filter_dfs)
+actual_final_df <- actual_final_df %>% tidyr::drop_na(location)
+
+p <- actual_final_df %>%
+  ggplot2::ggplot(ggplot2::aes(people_vaccinated_per_hundred, fit, color=location)) +
+  tidymv::geom_smooth_ci()+
+  ggplot2::geom_point(ggplot2::aes(people_vaccinated_per_hundred,frequency, color=location)) +
+  ggplot2::theme_minimal() + 
+  ggplot2::labs(x = "People Vaccinated Per Hundred", y = "Frequency of Variant S.E484")
+plotly::ggplotly(p) # , width=600, height=400
 ```
