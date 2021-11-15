@@ -131,7 +131,8 @@ df_vac <- read.csv("vaccinations.csv")
 
 
 ```{r}
-df_vac = rename(df_vac, c(date="week"))
+names(df_vac)[names(df_vac) == 'date'] <- 'week'
+#df_vac = rename(df_vac, c(date="week"))
 names (df_vac)
 ```
 
@@ -214,7 +215,7 @@ prop <- df_vac$people_fully_vaccinated/df_vac$total_vaccinations
 a.	Fit trendlines to the data (similar to covariants.org) - lookup options for doing this in plot_ly or ggplot2 (perhaps the "linetype" parameter for the "plot_ly" function?)
 
 ```{r}
-plot_ly(data = df, x=~prop, y=~frequency, color=~location ,  linetype = ~ )
+plot_ly(data = df, x=~prop, y=~frequency, color=~location) # ,  linetype = ~ 
 ```
 
 
@@ -249,6 +250,7 @@ spain$Time <- decimal_date(Fechas)
 
 
 ```{r}
+spain$frequency <- spain$cluster_sequences/spain$total_sequences
 model1 <- gam(frequency~s(Time), data = spain, method = "REML")
 ```
 
