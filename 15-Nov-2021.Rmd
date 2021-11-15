@@ -1,0 +1,523 @@
+---
+title: "Vaccine roll out escape mutation frequency project"
+output: html_document
+---
+
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+Packages
+
+```{r, echo=FALSE }
+#install.packages("rjson")
+#install.packages("dplyr")
+#install.packages("reshape")
+#install.packages("rmarkdown")
+#install.packages("plotly")
+#install.packages("devtools")
+#install.packages("hrbrthemes")
+#install.packages("patchwork")
+#install.packages("nlme")
+#install.packages("lubridate")
+#install.packages("corrplot")
+#install.packages("tidymv")
+
+```
+
+
+libraries
+```{r, echo=FALSE}
+library(rjson)
+library(jsonlite)
+library(dplyr)
+require(reshape)
+library(ggplot2)
+library(plotly)
+library(patchwork) 
+library(hrbrthemes)
+library(mgcv)
+library(lubridate)
+library(corrplot)
+library(tidymv)
+
+```
+
+
+**Índice**
+1. [Mutation data](#id1)
+2. [Vaccination data](#id2)
+3. [Plots](#id3)
+4. [GAMS](#id4)
+<div id='id1' />
+
+# MUTATION DATA
+
+```{r}
+json_path <- 'S.E484_data.json'
+data <- fromJSON(json_path)
+data
+
+```
+
+We gather the Json list in a df with the data that interest us and we add a new column to be called country in which it will be able to distinguish from each of the countries that contain the df. 
+
+```{r}
+df_cov <- bind_rows(data, .id = 'location')
+df_cov
+```
+
+
+### 1. Iterate through every country in our list of countries
+
+#### a. For each country save sublist as dataframe
+
+```{r}
+list_df <- list()
+i = 1
+for (country in names(data)) {
+  df <- as.data.frame(data[[country]])
+  list_df[[i]] <- df
+  i <- i + 1
+}
+```
+
+
+```{r}
+typeof(data)
+```
+
+```{r}
+print(list_df[[1]])
+```
+
+#### b. Make a column  in dataframe "country" - add the current country
+
+```{r}
+list_df <- list()
+i = 1
+for (country in names(data)) {
+  df <- as.data.frame(data[[country]])
+  df$country <- country
+  list_df[[i]] <- df
+  i <- i + 1
+}
+```
+
+```{r}
+print(list_df[[2]])
+```
+
+### 2. Merge all of the dataframes together which are in our list
+
+
+```{r}
+merged_df <- do.call("rbind", list_df)
+```
+
+```{r}
+merged_df %>% 
+  filter(country == "Japan")
+```
+
+
+#VACCINATION DATA
+
+```{r}
+df_vac <- read.csv("vaccinations.csv")
+```
+
+
+```{r}
+df_vac = rename(df_vac, c(date="week"))
+names (df_vac)
+```
+
+```{r}
+#df_cov
+#df_vac
+```
+
+We merged both data frames by the columns Locations and week.
+
+
+```{r}
+library(dplyr)
+df <- inner_join(x = df_cov, y = df_vac, by= c("location","week"))
+df
+```
+
+
+#PLOTS
+
+1- Mutation
+
+
+```{r}
+ggplot(data = df_cov, mapping = aes(x = cluster_sequences, total_sequences)) +
+  geom_point(mapping=aes(color=location))
+```
+```{r}
+plot_ly(data = df_cov, x=~cluster_sequences, y=~total_sequences, color=~location)
+```
+```{r}
+ggplot(data = df_cov, aes(x=week, y=total_sequences))+
+geom_line()+
+guides(colour=F)+
+theme(axis.text.x=element_text(angle = -90, hjust = 0))
+```
+
+
+
+a.	Plot x = time, y = proportion vaccinated (y = frequency of given mutant)
+```{r}
+plot_ly(data = df_vac, x=~week, y=~frequency, color=~location)
+```
+
+
+```{r}
+prop <- df_vac$people_fully_vaccinated/df_vac$total_vaccinations
+plot_ly(data = df_vac, x=~week, y=~people_fully_vaccinated_per_hundred, color=~location)
+```
+
+
+
+
+b.	Plotting correlation y=frequency of mutant in given time, x = proportion vaccination in a given month
+```{r}
+df$prop <- df$cluster_sequences/df$total_sequences
+```
+
+
+```{r}
+plot_ly(data = df, y=~prop, x=~people_fully_vaccinated_per_hundred, color=~location)
+
+```
+
+```{r}
+plot_ly(data = df, y=~prop, x=~week, color=~location ,type="scatter")
+```
+
+
+
+1.	Correlation plot (x=proportion vaccination, y=frequency of mutant)
+
+
+```{r}
+frequency <- df$cluster_sequences/df$total_sequences
+prop <- df_vac$people_fully_vaccinated/df_vac$total_vaccinations
+```
+
+
+a.	Fit trendlines to the data (similar to covariants.org) - lookup options for doing this in plot_ly or ggplot2 (perhaps the "linetype" parameter for the "plot_ly" function?)
+
+```{r}
+plot_ly(data = df, x=~prop, y=~frequency, color=~location ,  linetype = ~ )
+```
+
+
+# GAM MODELS
+
+## 1. example with data from Spain
+
+Filter the dataframe to one country (eg UK, US or Spain) so that we can try fitting a GAM to a single country to start with?
+
+```{r}
+spain <- df %>% 
+  filter(location == "Spain")
+```
+
+Add a column to our dataframe for the variant frequency (if this doesn't already exist)
+
+```{r}
+frequency <- df$cluster_sequences/df$total_sequences
+df <- cbind(df, frequency)
+```
+
+ variant freq (y, linear term no. or logisitc transform or fraction of variants) = time + vaccination rate changing over time (predictors)
+Model 1: variant freq (y) = time (x)
+Model 2: variant freq (y) = time (x) + vaccination rate (x2)
+
+
+```{r}
+Fechas <-as.Date(spain$week, tryFormats = "%Y-%m-%d")
+decimal_date(Fechas)
+spain$Time <- decimal_date(Fechas)
+```
+
+
+```{r}
+model1 <- gam(frequency~s(Time), data = spain, method = "REML")
+```
+
+### Plot 1 (prediction)
+
+
+```{r}
+plot(model1, pages = 1)
+```
+
+
+### Plot 2 (real data)
+
+```{r}
+ggplot(spain, aes(x=Time,frequency))+
+  geom_point()
+```
+
+```{r}
+
+gam.check(model1)
+```
+
+
+
+Correlation with all variables
+
+-All the variables must be numeric so we will need to hide those variables with characters.
+
+```{r}
+df_cor <- select(spain, -location, -week,-iso_code)
+round(cor(df_cor, method = "pearson"),
+digits= 2)
+```
+
+
+
+```{r}
+spain_cor <- select(spain, -location, -week,-iso_code)
+```
+
+
+```{r}
+round(cor(spain_cor),
+  digits = 2 # rounded to 2 decimals
+)
+```
+
+```{r}
+M<-cor(spain_cor)
+head(round(M,2))
+```
+
+
+```{r}
+corrplot(M, type="full")
+```
+
+# Combine plots of the GAM model and raw data points (this will help check the fit for the curves which appeared to be shifted downwards UK (0.01) and Spain (0.05)
+
+Check country names for merging datasets
+Generate two lists of country names, from the vaccinations and variants dataframes
+Remove all countries which are present in both lists
+Look at lists to see which countries are present in both dataframes but with different names eg United States vs USA
+Rename these countries in one the dataframes so that they're the same
+Remerge the dataframes (you should then expect to see more rows in the merged dataframe)
+
+Cambiamos los nombres en los diferentes df para que coincidan (USA,R.checa)
+
+```{r}
+df_cov[df_cov$location=="USA",]$location <- "United States"
+```
+
+```{r}
+df_cov[df_cov$location=="Czech Republic",]$location <- "Czechia"
+```
+
+
+```{r}
+df_cov[df_cov$location=="Sint Maarten",]$location <- "Sint Maarten (Dutch part)"
+```
+
+
+```{r}
+unique(df_cov$location)
+```
+
+```{r}
+unique(df_vac$location)
+```
+
+We create 2 lists for the mutation data and the vaccination data
+
+```{r}
+unique(df_cov$location)
+df_cov_location <- unique(df_cov$location)
+df_vac_location <- unique(df_vac$location)
+df_vac_location
+```
+
+Compare both lists
+
+```{r}
+final_list <- intersect(df_cov_location, df_vac_location)
+final_list
+```
+
+```{r}
+df_cov_final <- df_cov[is.element(df_cov$location, final_list),]
+
+df_vac_final <- df_vac[is.element(df_vac$location, final_list),]
+
+
+```
+
+```{r}
+unique(df_vac_final$location)
+```
+
+create a dataframe to merge both dataframes
+
+```{r}
+library(dplyr)
+df_final <- inner_join(x = df_cov_final, y = df_vac_final, by= c("location","week"))
+df_final
+```
+
+```{r}
+unique(df_final$location)
+```
+
+We show the values that are not present in both lists
+
+```{r}
+setdiff(df_cov_location,df_vac_location)
+
+```
+
+```{r}
+setdiff(df_vac_location,df_cov_location)
+```
+
+
+```{r}
+Fechas <-as.Date(df_final$week, tryFormats = "%Y-%m-%d")
+decimal_date(Fechas)
+df_final$Time <- lubridate::decimal_date(Fechas)
+```
+
+```{r}
+frequency <- df_final$cluster_sequences/df$total_sequences
+df_final <- cbind(df_final, frequency)
+```
+
+```{r}
+df_final$frequency <- df_final$cluster_sequences/df_final$total_sequences
+```
+
+
+
+GAM models <- spain
+
+
+```{r}
+spainm <- gam(frequency~s(Time), data = spain, method = "REML")
+summary(spainm)
+```
+
+```{r}
+model_p <- predict_gam(spainm, length_out = 30, values = list(x0=list(spain$Time)))
+model_p
+```
+queremos ver que datos estan en comun en ambas tablas
+
+```{r}
+list(spain$Time)
+list(model_p$Time)
+```
+
+
+```{r}
+new<- bind_rows(spain,model_p)
+```
+
+
+```{r}
+new %>%
+  ggplot(aes(Time, fit)) +
+  geom_smooth_ci()+
+  geom_point(aes(Time,frequency))
+
+```
+
+
+# Create a function to generate the GAM plot for any country
+
+
+```{r}
+filtrado_df <- function(df1, country) {
+df1 <- df1 %>% filter(location == country) 
+return(df1)
+}
+filter_df <- filtrado_df(df_final, 'Spain')
+```
+
+
+```{r}
+modelo_df <- function(filter_df) {
+model <- gam(frequency~s(Time), data = filter_df, method = "REML")
+model_p <- tidymv::predict_gam(model, length_out = 30 , values = list(x0=list(filter_df$Time)))
+modelos <- list(model = model, 
+                model_p = model_p)
+new<- bind_rows(filter_df,model_p) 
+return(new)
+}
+
+new <- modelo_df(filter_df)
+
+```
+
+
+
+```{r}
+plot_df <- function(new){
+p <- new %>%
+  ggplot2::ggplot(ggplot2::aes(Time, fit)) +
+  tidymv::geom_smooth_ci()+
+  ggplot2::geom_point(ggplot2::aes(Time,frequency))
+return(plotly::ggplotly(p))
+}
+
+plot <- plot_df(new)
+
+plot
+
+```
+
+
+```{r}
+plot_country <- function(df_final, country){
+  filter_df <- filtrado_df(df_final,country)
+  new <- modelo_df(filter_df)
+  plot <- plot_df(new)
+  return(plot)
+}
+
+plot_country(df_final,'Czechia')
+```
+
+# Plot with all countries
+
+```{r}
+countries <- unique(df_final$location)
+countries <- countries[1:10]
+filter_dfs <- list()
+i = 1
+for (country in countries) {
+  filter_df <- filtrado_df(df_final,country)
+  new <- modelo_df(filter_df)
+  filter_dfs[[country]] <- as.data.frame(new)
+  i <- i + 1
+}
+
+actual_final_df <- do.call("rbind", filter_dfs)
+
+p <- actual_final_df %>%
+  ggplot2::ggplot(ggplot2::aes(Time, fit, color=location)) +
+  tidymv::geom_smooth_ci()+
+  ggplot2::geom_point(ggplot2::aes(Time,frequency, color=location))
+plotly::ggplotly(p)
+
+```
