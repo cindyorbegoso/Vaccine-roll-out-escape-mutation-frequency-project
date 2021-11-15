@@ -459,10 +459,12 @@ filter_df <- filtrado_df(df_final, 'Spain')
 
 ```{r}
 modelo_df <- function(filter_df) {
+locaion <- filter_df$location[1]
 model <- gam(frequency~s(Time), data = filter_df, method = "REML")
 model_p <- tidymv::predict_gam(model, length_out = 30 , values = list(x0=list(filter_df$Time)))
 modelos <- list(model = model, 
                 model_p = model_p)
+model_p$location <- locaion 
 new<- bind_rows(filter_df,model_p) 
 return(new)
 }
@@ -515,6 +517,7 @@ for (country in countries) {
 }
 
 actual_final_df <- do.call("rbind", filter_dfs)
+actual_final_df <- actual_final_df %>% tidyr::drop_na(location)
 
 p <- actual_final_df %>%
   ggplot2::ggplot(ggplot2::aes(Time, fit, color=location)) +
