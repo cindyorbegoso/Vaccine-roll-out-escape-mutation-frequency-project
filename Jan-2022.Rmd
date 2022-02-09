@@ -1,0 +1,1055 @@
+---
+title: "Vaccine roll out escape mutation frequency project"
+author: Cindy Catherine Orbegoso Barrantes
+date: November 15, 2021
+output:
+  prettydoc::html_pretty:
+    theme: tactile
+    highlight: github
+---
+
+Packages
+
+```{r,echo=FALSE,cache=TRUE}
+#install.packages("rjson")
+#install.packages("dplyr")
+#install.packages("reshape")
+#install.packages("rmarkdown")
+#install.packages("plotly")
+#install.packages("devtools")
+#install.packages("hrbrthemes")
+#install.packages("patchwork")
+#install.packages("nlme")
+#install.packages("lubridate")
+#install.packages("corrplot")
+#install.packages("tidymv")
+
+```
+
+libraries
+
+```{r,warning=FALSE,message=FALSE}
+library(rjson)
+library(jsonlite)
+library(dplyr)
+require(reshape)
+library(ggplot2)
+library(plotly)
+library(patchwork) 
+library(hrbrthemes)
+library(mgcv)
+library(lubridate)
+library(corrplot)
+library(tidymv)
+
+```
+
+**Índice**
+1. [Mutation data](#id1)
+2. [Vaccination data](#id2)
+3. [Plots](#id3)
+4. [GAMS](#id4)
+
+
+<div id='id1' />
+# MUTATION DATA E483K
+
+```{r}
+json_path <- 'S.E484_data2.json'
+data <- fromJSON(json_path)
+head(data[1])
+```
+
+We gather the Json list in a df with the data that interest us and we add a new column to be called country in which it will be able to distinguish from each of the countries that contain the df. 
+
+```{r}
+df_cov <- bind_rows(data, .id = 'location')
+head(df_cov)
+```
+
+
+### 1. Iterate through every country in our list of countries
+
+#### a. For each country save sublist as dataframe
+
+```{r}
+list_df <- list()
+i = 1
+for (country in names(data)) {
+  df <- as.data.frame(data[[country]])
+  list_df[[i]] <- df
+  i <- i + 1
+}
+```
+
+
+```{r}
+typeof(data)
+```
+
+```{r}
+print(list_df[[1]])
+```
+
+#### b. Make a column  in dataframe "country" - add the current country
+
+```{r}
+list_df <- list()
+i = 1
+for (country in names(data)) {
+  df <- as.data.frame(data[[country]])
+  df$country <- country
+  list_df[[i]] <- df
+  i <- i + 1
+}
+```
+
+```{r}
+print(list_df[[2]])
+```
+
+### 2. Merge all of the dataframes together which are in our list
+
+
+```{r}
+merged_df <- do.call("rbind", list_df)
+```
+
+```{r}
+merged_df %>% 
+  filter(country == "Japan")
+```
+
+
+# VACCINATION DATA
+
+```{r}
+df_vac <- read.csv("vaccinations.csv")
+```
+
+
+```{r}
+names(df_vac)[names(df_vac) == 'date'] <- 'week'
+#df_vac = rename(df_vac, c(date="week"))
+names (df_vac)
+    
+```
+
+
+#df_cov
+#df_vac
+
+
+We merged both data frames by the columns Locations and week.
+
+
+```{r}
+library(dplyr)
+df <- inner_join(x = df_cov, y = df_vac, by= c("location","week"))
+df
+```
+
+
+# PLOTS
+
+1- Mutation
+
+
+```{r}
+ggplot(data = df_cov, mapping = aes(x = cluster_sequences, total_sequences)) +
+  geom_point(mapping=aes(color=location))
+```
+```{r}
+plot_ly(data = df_cov, x=~cluster_sequences, y=~total_sequences, color=~location)
+```
+```{r}
+ggplot(data = df_cov, aes(x=week, y=total_sequences))+
+geom_line()+
+guides(colour=F)+
+theme(axis.text.x=element_text(angle = -90, hjust = 0))
+```
+
+
+
+a.	Plot x = time, y = proportion vaccinated (y = frequency of given mutant)
+```{r}
+plot_ly(data = df_vac, x=~week, y=~frequency, color=~location)
+```
+
+
+```{r}
+prop <- df_vac$people_fully_vaccinated/df_vac$total_vaccinations
+plot_ly(data = df_vac, x=~week, y=~people_fully_vaccinated_per_hundred, color=~location)
+```
+
+
+
+
+b.	Plotting correlation y=frequency of mutant in given time, x = proportion vaccination in a given month
+```{r}
+df$prop <- df$cluster_sequences/df$total_sequences
+```
+
+
+```{r}
+plot_ly(data = df, y=~prop, x=~people_fully_vaccinated_per_hundred, color=~location)
+
+```
+
+```{r}
+plot_ly(data = df, y=~prop, x=~week, color=~location ,type="scatter")
+```
+
+
+
+1.	Correlation plot (x=proportion vaccination, y=frequency of mutant)
+
+
+```{r}
+frequency <- df$cluster_sequences/df$total_sequences
+prop <- df_vac$people_fully_vaccinated/df_vac$total_vaccinations
+```
+
+
+a.	Fit trendlines to the data (similar to covariants.org) - lookup options for doing this in plot_ly or ggplot2 (perhaps the "linetype" parameter for the "plot_ly" function?)
+
+```{r}
+plot_ly(data = df, x=~prop, y=~frequency, color=~location) # ,  linetype = ~ 
+```
+
+
+# GAM MODELS
+
+## 1. example with data from Spain
+
+Filter the dataframe to one country (eg UK, US or Spain) so that we can try fitting a GAM to a single country to start with?
+
+```{r}
+spain <- df %>% 
+  filter(location == "Spain")
+```
+
+Add a column to our dataframe for the variant frequency (if this doesn't already exist)
+
+```{r}
+frequency <- df$cluster_sequences/df$total_sequences
+df <- cbind(df, frequency)
+```
+
+ variant freq (y, linear term no. or logisitc transform or fraction of variants) = time + vaccination rate changing over time (predictors)
+Model 1: variant freq (y) = time (x)
+Model 2: variant freq (y) = time (x) + vaccination rate (x2)
+
+
+```{r}
+Fechas <-as.Date(spain$week, tryFormats = "%Y-%m-%d")
+decimal_date(Fechas)
+spain$Time <- decimal_date(Fechas)
+```
+
+
+```{r}
+spain$frequency <- spain$cluster_sequences/spain$total_sequences
+model1 <- gam(frequency~s(Time), data = spain, method = "REML")
+```
+
+### Plot 1 (prediction)
+
+
+```{r}
+plot(model1, pages = 1)
+```
+
+
+### Plot 2 (real data)
+
+```{r}
+ggplot(spain, aes(x=Time,frequency))+
+  geom_point()
+```
+
+```{r}
+
+gam.check(model1)
+```
+
+
+
+
+
+# Combine plots of the GAM model and raw data points (this will help check the fit for the curves which appeared to be shifted downwards UK (0.01) and Spain (0.05)
+
+Check country names for merging datasets
+Generate two lists of country names, from the vaccinations and variants dataframes
+Remove all countries which are present in both lists
+Look at lists to see which countries are present in both dataframes but with different names eg United States vs USA
+Rename these countries in one the dataframes so that they're the same
+Remerge the dataframes (you should then expect to see more rows in the merged dataframe)
+
+Cambiamos los nombres en los diferentes df para que coincidan (USA,R.checa)
+
+```{r}
+df_cov[df_cov$location=="USA",]$location <- "United States"
+```
+
+```{r}
+df_cov[df_cov$location=="Czech Republic",]$location <- "Czechia"
+```
+
+
+```{r}
+df_cov[df_cov$location=="Sint Maarten",]$location <- "Sint Maarten (Dutch part)"
+```
+
+
+```{r}
+unique(df_cov$location)
+```
+
+```{r}
+unique(df_vac$location)
+```
+
+We create 2 lists for the mutation data and the vaccination data
+
+```{r}
+unique(df_cov$location)
+df_cov_location <- unique(df_cov$location)
+df_vac_location <- unique(df_vac$location)
+df_vac_location
+```
+
+Compare both lists
+
+```{r}
+final_list <- intersect(df_cov_location, df_vac_location)
+final_list
+```
+
+```{r}
+df_cov_final <- df_cov[is.element(df_cov$location, final_list),]
+
+df_vac_final <- df_vac[is.element(df_vac$location, final_list),]
+
+
+```
+
+```{r}
+unique(df_vac_final$location)
+```
+
+create a dataframe to merge both dataframes
+
+```{r}
+library(dplyr)
+df_final <- inner_join(x = df_cov_final, y = df_vac_final, by= c("location","week"))
+df_final
+```
+
+```{r}
+unique(df_final$location)
+```
+
+We show the values that are not present in both lists
+
+```{r}
+setdiff(df_cov_location,df_vac_location)
+
+```
+
+```{r}
+setdiff(df_vac_location,df_cov_location)
+```
+
+
+```{r}
+Fechas <-as.Date(df_final$week, tryFormats = "%Y-%m-%d")
+decimal_date(Fechas)
+df_final$Time <- lubridate::decimal_date(Fechas)
+```
+
+```{r}
+frequency <- df_final$cluster_sequences/df$total_sequences
+df_final <- cbind(df_final, frequency)
+```
+
+```{r}
+df_final$frequency <- df_final$cluster_sequences/df_final$total_sequences
+```
+
+
+
+GAM models <- spain
+
+
+```{r}
+spainm <- gam(frequency~s(Time), data = spain, method = "REML")
+summary(spainm)
+```
+
+```{r}
+model_p <- predict_gam(spainm, length_out = 30, values = list(x0=list(spain$Time)))
+model_p
+```
+queremos ver que datos estan en comun en ambas tablas
+
+```{r}
+list(spain$Time)
+list(model_p$Time)
+```
+
+
+```{r}
+new<- bind_rows(spain,model_p)
+```
+
+
+```{r}
+new %>%
+  ggplot(aes(Time, fit)) +
+  geom_smooth_ci()+
+  geom_point(aes(Time,frequency))
+
+```
+
+
+# Create a function to generate the GAM plot for any country
+
+
+```{r}
+filtrado_df <- function(df1, country) {
+df1 <- df1 %>% filter(location == country) 
+return(df1)
+}
+filter_df <- filtrado_df(df_final, 'Spain')
+```
+
+
+```{r}
+modelo_df <- function(filter_df, x_col='Time') {
+locaion <- filter_df$location[1]
+if (x_col == "Time") {
+  model <- gam(frequency~s(Time), data = filter_df, method = "REML")
+  model_p <- tidymv::predict_gam(model, length_out = 30 , values = list(x0=list(filter_df$Time)))
+} else if (x_col == "Prop") {
+  model <- gam(frequency~s(people_vaccinated_per_hundred), data = filter_df, method = "REML")
+  model_p <- tidymv::predict_gam(model, length_out = 30 , values = list(x0=list(filter_df$people_vaccinated_per_hundred)))}
+else if (x_col == "All"){
+  model <- gam(frequency~s(Time,k=3)+people_vaccinated_per_hundred, data= filter_df,method= "REML")
+  model_p <- tidymv::predict_gam(model, length_out = 30 )
+}
+modelos <- list(model = model, 
+                model_p = model_p)
+model_p$location <- locaion 
+new<- bind_rows(filter_df,model_p) 
+return(new)
+} 
+
+new <- modelo_df(filter_df)
+
+```
+
+
+
+```{r}
+plot_df <- function(new){
+p <- new %>%
+  ggplot2::ggplot(ggplot2::aes(Time, fit)) +
+  tidymv::geom_smooth_ci()+
+  ggplot2::geom_point(ggplot2::aes(Time,frequency))
+return(plotly::ggplotly(p))
+}
+
+plot <- plot_df(new)
+
+plot
+
+```
+
+
+```{r}
+plot_country <- function(df_final, country){
+  filter_df <- filtrado_df(df_final,country)
+  new <- modelo_df(filter_df)
+  plot <- plot_df(new)
+  return(plot)
+}
+
+plot_country(df_final,'Czechia')
+```
+
+# Plot with all countries
+
+```{r}
+countries <- unique(df_final$location)
+countries <- countries[1:10] #[1:19]
+# countries <- c('Spain', 'United Kingdom', 'United States')
+filter_dfs <- list()
+i = 1
+for (country in countries) {
+  filter_df <- filtrado_df(df_final,country)
+  new <- modelo_df(filter_df)
+  filter_dfs[[country]] <- as.data.frame(new)
+  i <- i + 1
+}
+
+actual_final_df <- do.call("rbind", filter_dfs)
+actual_final_df <- actual_final_df %>% tidyr::drop_na(location)
+
+p <- actual_final_df %>%
+  ggplot2::ggplot(ggplot2::aes(Time, fit, color=location)) +
+  tidymv::geom_smooth_ci()+
+  ggplot2::geom_point(ggplot2::aes(Time,frequency, color=location)) +
+  ggplot2::theme_minimal() + 
+  ggplot2::labs(x = "Time", y = "Frequency of Variant S.E484")
+plotly::ggplotly(p) # , width=600, height=400
+```
+
+
+
+```{r}
+countries <- unique(df_final$location)
+countries <- countries[1:10] #[1:19]
+# countries <- c('Spain', 'United Kingdom', 'United States')
+filter_dfs <- list()
+i = 1
+for (country in countries) {
+  filter_df <- filtrado_df(df_final,country)
+  new <- modelo_df(filter_df, x_col='All')
+  filter_dfs[[country]] <- as.data.frame(new)
+  i <- i + 1
+}
+
+actual_final_df <- do.call("rbind", filter_dfs)
+actual_final_df <- actual_final_df %>% tidyr::drop_na(location)
+
+p <- actual_final_df %>%
+  ggplot2::ggplot(ggplot2::aes(people_vaccinated_per_hundred, fit, color=location)) +
+  tidymv::geom_smooth_ci()+
+  ggplot2::geom_point(ggplot2::aes(people_vaccinated_per_hundred,frequency, color=location)) +
+  ggplot2::theme_minimal() + 
+  ggplot2::labs(x = "People Vaccinated Per Hundred", y = "Frequency of Variant S.E484")
+plotly::ggplotly(p) # , width=600, height=400
+```
+
+
+```{r}
+
+# Single country well
+df <- filtrado_df(df_final, 'Spain')
+model <- gam(frequency ~ Time + s(people_vaccinated_per_hundred, by = Time), data = df)
+
+# Multiple countries badly
+#df <- df_final
+#countries <- unique(df_final$location)[1:10]
+#df <- subset(df, location %in% countries)
+#model <- gam(frequency ~ Time + s(people_vaccinated_per_hundred, by = Time) + location, data = df)
+
+model_p <- tidymv::predict_gam(model)
+df <- bind_rows(df, model_p) 
+
+summary(model)
+
+plot(model, shade = TRUE, pages = 1, scale = 0)
+
+df %>%
+  ggplot2::ggplot(ggplot2::aes(people_vaccinated_per_hundred, fit, color=location)) +
+  ggplot2::geom_point(ggplot2::aes(people_vaccinated_per_hundred,frequency, color=location)) +
+  tidymv::geom_smooth_ci()+
+  ggplot2::theme_minimal() + 
+  ggplot2::labs(x = "People Vaccinated Per Hundred", y = "Frequency of Variant S.E484")
+```
+Wed 15/12/21
+
+
+
+Install R package `gratia`
+
+    
+```{r}
+install.packages("gratia")
+library(gratia)
+```
+
+
+Fit a GAM model for all countries, predicting variant frequency using a tensor product of time and proportion vaccinated using a location (country) as a covariante
+
+
+# GAM Model 2
+
+```{r}
+
+# df should be a dataframe containing the vaccination + variant data for all countries you want to analyse
+
+df <- df_final
+df
+
+countries <- unique(df_final$location)[1:10]
+countries
+
+df <- subset(df, location %in% countries)
+df
+
+df$location <- as.factor(df$location)
+
+
+#modelo2 <- gam(frequency ~ location + te(Time, by=people_vaccinated_per_hundred), data = df , family=betar(link='logit'))
+
+
+
+modelo2 <- gam(frequency ~ location + te(Time, by=location), data = df, family=betar(link='logit'))
+
+
+plot(modelo2)
+summary(modelo2)
+
+
+```
+
+
+Plot the results of the above GAM model using the gratia R package as per the example below
+
+```{r}
+library(dplyr)
+library(qgam)
+library(mgcv)
+library(visreg)
+#visreg(modelo2, xvar = "frequency", by = "people_vaccinated_per_hundred")
+draw(modelo2)
+plot(modelo2)
+summary(modelo2)
+```
+
+24-Jan-2022
+
+
+```{r}
+plot_smooth(modelo2, view="Time", plot_all="location",
+            rm.ranef=TRUE)
+```
+
+example:
+
+
+```{r}
+set.seed(999)
+n_obs <- 80
+time_span <- 100
+time <- sort(runif(n_obs,0,time_span))
+Wiener <- cumsum(rnorm(n_obs)) / sqrt(n_obs)
+y_obs <- Wiener + rnorm(n_obs,0,.05)
+
+```
+
+```{r}
+create.bspline.basis <- function (rangeval=NULL, nbasis=NULL,
+                                  norder=4,      breaks=NULL,
+                                  dropind=NULL,  quadvals=NULL,
+                                  values=NULL,   basisvalues=NULL,
+                                  names="bspl")
+{
+#  This function creates a bspline functional data basis.
+#  Arguments
+#  RANGEVAL...an array of length 2 containing the lower and upper
+#             boundaries for the rangeval of argument values,
+#             or a positive number, in which case command
+#             rangeval <- c(0, rangeval) is executed.
+#             the default is c(0,1)
+#  NBASIS  ...the number of basis functions.  This argument must be
+#             supplied, and must be a positive integer.
+#  NORDER  ...order of b-splines (one higher than their degree).  The
+#             default of 4 gives cubic splines.
+#  BREAKS  ...also called knots, these are a non-decreasing sequence
+#             of junction points between piecewise polynomial segments.
+#             They must satisfy BREAKS[1] = RANGEVAL[1] and
+#             BREAKS[NBREAKS] = RANGEVAL[2], where NBREAKS is the total
+#             number of BREAKS.  There must be at least 2 BREAKS.
+#  There is a potential for inconsistency among arguments NBASIS, NORDER,
+#  and BREAKS since
+#             NBASIS = NORDER + LENGTH(BREAKS) - 2
+#  An error message is issued if this is the case.  Although previous
+#  versions of this function attempted to resolve this inconsistency in
+#  various ways, this is now considered to be too risky.
+#  DROPIND ...A vector of integers specifiying the basis functions to
+#             be dropped, if any.  For example, if it is required that
+#             a function be zero at the left boundary, this is achieved
+#             by dropping the first basis function, the only one that
+#             is nonzero at that point.
+#  QUADVALS...A NQUAD by 2 matrix.  The firs t column contains quadrature
+#             points to be used in a fixed point quadrature.  The second
+#             contains quadrature weights.  For example, for (Simpson"s
+#             rule for (NQUAD = 7, the points are equally spaced and the
+#             weights are delta.*[1, 4, 2, 4, 2, 4, 1]/3.  DELTA is the
+#             spacing between quadrature points.  The default is
+#             matrix("numeric",0,0).
+#  VALUES ... A list, with entries containing the values of
+#             the basis function derivatives starting with 0 and
+#             going up to the highest derivative needed.  The values
+#             correspond to quadrature points in QUADVALS and it is
+#             up to the user to decide whether or not to multiply
+#             the derivative values by the square roots of the
+#             quadrature weights so as to make numerical integration
+#             a simple matrix multiplication.
+#             Values are checked against QUADVALS to ensure the correct
+#             number of rows, and against NBASIS to ensure the correct
+#             number of columns.
+#             The default value of is VALUES is vector("list",0).
+#             VALUES contains values of basis functions and derivatives at
+#             quadrature points weighted by square root of quadrature weights.
+#             These values are only generated as required, and only if slot
+#             QUADVALS is not matrix("numeric",0,0).
+#  BASISVALUES...A vector of lists, allocated by code such as
+#             vector("list",1).
+#             This field is designed to avoid evaluation of a
+#             basis system repeatedly at a set of argument values.
+#             Each list within the vector corresponds to a specific set
+#             of argument values, and must have at least two components,
+#             which may be tagged as you wish.
+#             The first component in an element of the list vector contains the
+#             argument values.
+#             The second component in an element of the list vector
+#             contains a matrix of values of the basis functions evaluated
+#             at the arguments in the first component.
+#             The third and subsequent components, if present, contain
+#             matrices of values their derivatives up to a maximum
+#             derivative order.
+#             Whenever function getbasismatrix is called, it checks
+#             the first list in each row to see, first, if the number of
+#             argument values corresponds to the size of the first dimension,
+#             and if this test succeeds, checks that all of the argument
+#             values match.  This takes time, of course, but is much
+#             faster than re-evaluation of the basis system.  Even this
+#             time can be avoided by direct retrieval of the desired
+#             array.
+#             For example, you might set up a vector of argument values
+#             called "evalargs" along with a matrix of basis function
+#             values for these argument values called "basismat".
+#             You might want too use tags like "args" and "values",
+#             respectively for these.  You would then assign them
+#             to BASISVALUES with code such as
+#               basisobj$basisvalues <- vector("list",1)
+#               basisobj$basisvalues[[1]] <-
+#                               list(args=evalargs, values=basismat)
+#  BASISFNNAMES ... Either a character vector of length NABASIS
+#             or a single character string to which NORDER, "." and
+#             1:NBASIS are appended by the command
+#                paste(names, norder, ".", 1:nbreaks, sep="").
+#             For example, if norder = 4, this defaults to
+#                     'bspl4.1', 'bspl4.2', ... .
+#  Returns
+#  BASISFD ...a functional data basis object
+
+#  Last modified  11 February 2015 by Jim Ramsay
+
+#  -------------------------------------------------------------------------
+#  Default basis for missing arguments:  A B-spline basis over [0,1] of
+#    of specified norder with norder basis functions.
+#    norder = 1 = one basis function = constant 1
+#    norder = 2 = two basis functions = 2 right triangles,
+#      one left, the other right.  They are a basis for straight lines
+#      over the unit interval, and are equivalent to a monomial basis
+#      with two basis functions.  This B-spline system can be
+#      explicitly created with the command
+#                create.bspline.basis(c(0,1), 2, 2)
+#    norder = 3 = three basis functions:  x^2, x-(x-.5)^2, (x-1)^2
+#    norder = 4 = default = 4 basis functions
+#      = the simplest cubic spline basis
+#  -------------------------------------------------------------------------
+
+  type        <- "bspline"
+
+#  if (nargs()==0) {
+#    rangeval    <- c(0,1)
+#    nbasis      <- 2
+#    params      <- NULL
+#    dropind     <- NULL
+#    quadvals    <- NULL
+#    values      <- NULL
+#    basisvalues <- NULL
+#    basisobj  <- list(type=type, rangeval=rangeval, nbasis=nbasis,
+#                  params=params, dropind=dropind,   quadvals=quadvals,
+#                  values=values, basisvalues=basisvalues, names=names)
+#    oldClass(basisobj) <- "basisfd"
+#    return(basisobj)
+#  }
+
+#  ------------------------------------------------------------------------
+#                     Set up non-default basis
+#  ------------------------------------------------------------------------
+
+##
+## 1.  check RANGEVAL
+##
+#  1.1.  First check breaks is either NULL
+#        or is numeric with positive length
+#  Breaks <- breaks
+  op <- options(warn=-1)
+  Breaks <- as.numeric(breaks)
+  options(op)
+  if(!is.null(breaks)){
+  	if(min(diff(breaks) < 0)) {
+  		stop('One or more breaks differences are negative.')
+  	}
+    if(is.numeric(breaks)){
+      if(length(breaks)<1)breaks <- NULL
+      if(any(is.na(breaks)))
+        stop('breaks contains NAs;  not allowed.')
+      if(any(is.infinite(breaks)))
+        stop('breaks contains Infs;  not allowed.')
+    }
+    else {
+#     suppress warning if NAs generated
+#      op <- options(warn=-1)
+#      Breaks <- as.numeric(breaks)
+#      options(op)
+      nNA <- sum(is.na(Breaks))
+      if(nNA>0)
+        stop("as.numeric(breaks) contains ", nNA,
+             ' NA', c('', 's')[1+(nNA>1)],
+             ';  class(breaks) = ', class(breaks))
+    }
+  }
+#
+#  Rangeval <- rangeval
+  op <- options(warn=-1)
+  Rangeval <- as.numeric(rangeval)
+  options(op)
+  if(length(rangeval)<1) {
+    if(is.null(breaks)) {
+      rangeval <- 0:1
+    } else{
+      rangeval <- range(breaks)
+      if(diff(rangeval)==0)
+        stop('diff(range(breaks))==0;  not allowed.')
+    }
+  } else {
+#    op <- options(warn=-1)
+#    rangeval <- as.numeric(rangeval)
+#    options(op)
+    nNAr <- sum(is.na(Rangeval))
+    if(nNAr>0)
+      stop('as.numeric(rangeval) contains ', nNAr,
+           ' NA', c('', 's')[1+(nNAr>1)],
+           ';  class(rangeval) = ', class(rangeval) )
+  }
+  if(length(rangeval) == 1){
+      if(rangeval <= 0)
+        stop("'rangeval' a single value that is not positive, is ",
+             rangeval)
+      rangeval = c(0,rangeval)
+  }
+#  if (!rangechk(rangeval)) stop("Argument 'rangeval' is not correct.")
+#  if(!is.vector(rangeval))
+#    stop('rangeval is not a vector;  class(rangeval) = ',
+#         class(rangeval))
+# rangeval too long ???
+  if(length(rangeval)>2){
+    if(!is.null(breaks))
+      stop('breaks can not be provided with length(rangeval)>2;  ',
+           ' length(rangeval) = ', length(rangeval),
+           ' and length(breaks) = ', length(breaks))
+    breaks <- rangeval
+    rangeval <- range(breaks)
+  }
+#
+  if(rangeval[1]>=rangeval[2])
+    stop('rangeval[1] must be less than rangeval[2];  instead ',
+         'rangeval[1] = ', rangeval[1], c('==', '>')[diff(rangeval)<0],
+         ' rangeval[2] = ', rangeval[2])
+##
+## 2.  Check norder
+##
+  if(!is.numeric(norder))
+    stop("norder must be numeric;  class(norder) = ",
+         class(norder))
+#
+  if(length(norder)>1)
+    stop('norder must be a single number;  length(norder) = ',
+         length(norder))
+#
+  if(norder<=0)stop("norder must be positive, is ", norder)
+#
+  if((norder%%1) > 0)
+    stop("norder must be an integer, = ", norder,
+         ', with fractional part = ',norder%%1)
+##
+## 3.  Check nbasis
+##
+#  if (is.null(nbasis))     stop("Argument 'nbasis' is not supplied.")
+  nbreaks <- length(breaks)
+  {
+    if(!is.null(nbasis)){
+      if(!is.numeric(nbasis))
+        stop('nbasis must be numeric, is ', class(nbasis))
+      if((lnb <- length(nbasis))>1)
+        stop("nbasis must be a single positive integer;  ",
+             "length(nbasis) = ", lnb, " > 1;  first 2 elements = ",
+             nbasis[1], ", ", nbasis[2])
+      if ((nbasis%%1)>0)
+        stop("nbasis is not an integer, = ", nbasis,
+             ", with fractional part = ", nbasis%%1)
+# if (nbasis < 1)          stop("Argument 'nbasis' is not positive.")
+      if(nbasis < norder)
+        stop('nbasis must be at least norder;  nbasis = ', nbasis,
+             ';  norder = ', norder)
+##
+## 4.  Check breaks
+##
+#  This argument is optional, and defaults to NULL.
+#  if not NULL, it must contain at least two values, the first and last
+#  being equal to the corresponding values of RANGEVAL.   The values
+#  may not decrease, but there can be sequences of equal values.
+#  the number of break values must be consistent with the values
+#  of NBASIS and NORDER via the equation
+#        NBASIS = NORDER + NBREAKS - 2
+      if(!is.null(breaks)){
+        if (nbreaks < 2)
+          stop("Number of values in argument 'breaks' less than 2.")
+        if(breaks[1] != rangeval[1] || breaks[nbreaks] != rangeval[2])
+          stop(paste("Range of argument 'breaks' not identical to",
+                     "that of argument 'rangeval'."))
+        if (min(diff(breaks)) < 0)
+          stop("Values in argument 'breaks' are decreasing.")
+#  Check for consistency with NBASIS and NORDER
+        if (nbasis != norder + nbreaks - 2)
+          stop(paste("Relation nbasis = norder + length(breaks) - 2",
+                     "does not hold;  nbasis = ", nbasis,
+                     "norder = ", norder, "length(breaks) = ",
+                     length(breaks)) )
+      }
+      else{
+#  default to nbasis - norder + 2 equally spaced break values
+        breaks <- seq(rangeval[1], rangeval[2],
+                      length = nbasis - norder + 2)
+        nbreaks <- length(breaks)
+      }
+    }
+    else {
+#   is.null(nbasis)
+      if(is.null(breaks))nbasis <- norder
+      else
+        nbasis <- length(breaks)+norder-2
+    }
+  }
+##
+## 5.  Set up the PARAMS vector, which contains only the interior knots.
+##
+  if (nbreaks > 2) {
+    params <- breaks[2:(nbreaks-1)]
+  } else {
+    params <- NULL
+  }
+##
+## 6.  set up basis object
+##
+  basisobj <- basisfd(type=type, rangeval=rangeval, nbasis=nbasis,
+                  params=params, dropind=dropind,   quadvals=quadvals,
+                  values=values, basisvalues=basisvalues)
+##
+## 7.  names
+##
+  {
+    ndropind = length(dropind)
+    if(length(names) == nbasis)
+      basisobj$names <- names
+    else {
+      if(length(names) > 1)
+        stop('length(names) = ', length(names), ';  must be either ',
+             '1 or nbasis = ', nbasis)
+      basisind = 1:nbasis
+      names   = paste(names, norder, ".",as.character(basisind), sep="")
+      basisobj$names <- names
+    }
+  }
+##
+## 8.  Done
+##
+##  if(!is.null(axes))basisobj$axes <- axes
+  basisobj
+
+}
+```
+
+
+
+
+```{r}
+times_basis = seq(0,time_span,1)
+knots    = c(seq(0,time_span,5)) #Location of knots
+n_knots   = length(knots) #Number of knots
+n_order   = 4 # order of basis functions: cubic bspline: order = 3 + 1
+n_basis   = length(knots) + n_order - 2;
+
+basis = fda::create.bspline.basis(c(min(times_basis),max(times_basis)),n_basis,n_order,knots)
+n_basis
+
+```
+
+
+```{r}
+PHI = eval.basis(time, basis) 
+dim(PHI)
+
+```
+
+```{r}
+matplot(time,PHI,type='l',lwd=1,lty=1, xlab='time',ylab='basis',cex.lab=1,cex.axis=1)
+for (i in 1:n_knots)
+{
+  abline(v=knots[i], lty=2, lwd=1)
+}
+```
+
+```{r}
+# Least squares estimate
+# estimate basis coefficient
+M = ginv(t(PHI) %*% PHI) %*% t(PHI)
+c_hat = M %*% Wiener
+```
+
+
+```{r}
+y_hat = PHI %*% c_hat
+# Augment data frame for plotting
+df <- df %>% mutate(y_hat = y_hat)
+p2 <- df %>% ggplot() + 
+      geom_line(aes(x = time, y = Wiener), col = "grey") +
+      geom_point(aes(x = time, y = y_obs)) +
+      geom_line(aes(x = time, y = y_hat), col = "red")
+p2 + ggtitle("Original curve and least squares estimate") + 
+      xlab("time") + ylab("f(time)")
+```
+
+```{r}
+# estimate the variance of noise
+## SSE = (Y - Xb)'(Y - Xb)
+SSE = t(y_hat-y_obs)%*%(y_hat-y_obs)
+sigma2 = SSE/(n_obs-n_basis)
+
+# estimate the variance of the fitted curve
+# H is the Hat matrix H
+# H = X*inv(X'X)*X``
+H = PHI %*% M
+varYhat = diag(H %*% H * matrix(sigma2,n_obs,n_obs))
+
+# 95% confidence interval
+
+y_hat025 = y_hat-1.96*sqrt(varYhat)
+y_hat975 = y_hat+1.96*sqrt(varYhat)
+```
+
+```{r}
+df <- mutate(df, y_hat025 = y_hat025,
+                 y_hat975 = y_hat975)
+#names(df) <- c("time","Wiener","y_hat", "y_hat025", "y_hat975")
+p3 <- df %>% ggplot() + 
+      geom_line(aes(x = time, y = Wiener), col = "grey") +
+      geom_point(aes(x = time, y = y_obs)) +
+      geom_line(aes(x = time, y = y_hat), col = "red") +
+      geom_line(aes(x = time, y_hat025), col = "green") +
+      geom_line(aes(x = time, y_hat975), col = "green") 
+p3 + ggtitle("Estimated curve with error bars") + 
+     xlab("time") + ylab("f(time)")
+```
+
+
