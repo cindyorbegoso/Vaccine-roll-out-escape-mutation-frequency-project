@@ -1,7 +1,7 @@
 ---
 title: "Vaccine roll out escape mutation frequency project"
 author: Cindy Catherine Orbegoso Barrantes
-date: November 15, 2021
+date: Feb, 2022
 output:
   prettydoc::html_pretty:
     theme: tactile
@@ -23,7 +23,6 @@ Packages
 #install.packages("lubridate")
 #install.packages("corrplot")
 #install.packages("tidymv")
-
 ```
 
 libraries
@@ -41,10 +40,11 @@ library(mgcv)
 library(lubridate)
 library(corrplot)
 library(tidymv)
-
 ```
 
-**Índice**
+
+
+**Index**
 1. [Mutation data](#id1)
 2. [Vaccination data](#id2)
 3. [Plots](#id3)
@@ -67,7 +67,6 @@ df_cov <- bind_rows(data, .id = 'location')
 head(df_cov)
 ```
 
-
 ### 1. Iterate through every country in our list of countries
 
 #### a. For each country save sublist as dataframe
@@ -82,10 +81,6 @@ for (country in names(data)) {
 }
 ```
 
-
-```{r}
-typeof(data)
-```
 
 ```{r}
 print(list_df[[1]])
@@ -120,7 +115,7 @@ merged_df %>%
   filter(country == "Japan")
 ```
 
-
+<div id='id2' />
 # VACCINATION DATA
 
 ```{r}
@@ -134,14 +129,11 @@ names(df_vac)[names(df_vac) == 'date'] <- 'week'
 names (df_vac)
     
 ```
-
-
 #df_cov
 #df_vac
 
 
 We merged both data frames by the columns Locations and week.
-
 
 ```{r}
 library(dplyr)
@@ -149,75 +141,47 @@ df <- inner_join(x = df_cov, y = df_vac, by= c("location","week"))
 df
 ```
 
-
+<div id='id3' />
 # PLOTS
 
-1- Mutation
+total sequences vs cluster sequences
 
-
-```{r}
-ggplot(data = df_cov, mapping = aes(x = cluster_sequences, total_sequences)) +
-  geom_point(mapping=aes(color=location))
-```
 ```{r}
 plot_ly(data = df_cov, x=~cluster_sequences, y=~total_sequences, color=~location)
 ```
+total sequences over the time
+
 ```{r}
 ggplot(data = df_cov, aes(x=week, y=total_sequences))+
 geom_line()+
 guides(colour=F)+
 theme(axis.text.x=element_text(angle = -90, hjust = 0))
 ```
-
-
-
-a.	Plot x = time, y = proportion vaccinated (y = frequency of given mutant)
-```{r}
-plot_ly(data = df_vac, x=~week, y=~frequency, color=~location)
-```
-
+People fully vaccinated over the time
 
 ```{r}
 prop <- df_vac$people_fully_vaccinated/df_vac$total_vaccinations
 plot_ly(data = df_vac, x=~week, y=~people_fully_vaccinated_per_hundred, color=~location)
 ```
 
+Plotting correlation y=frequency of mutant in given time, x = proportion vaccination in a given month
 
-
-
-b.	Plotting correlation y=frequency of mutant in given time, x = proportion vaccination in a given month
 ```{r}
 df$prop <- df$cluster_sequences/df$total_sequences
 ```
-
 
 ```{r}
 plot_ly(data = df, y=~prop, x=~people_fully_vaccinated_per_hundred, color=~location)
 
 ```
 
+Proportion over the time by country
+
 ```{r}
 plot_ly(data = df, y=~prop, x=~week, color=~location ,type="scatter")
 ```
 
-
-
-1.	Correlation plot (x=proportion vaccination, y=frequency of mutant)
-
-
-```{r}
-frequency <- df$cluster_sequences/df$total_sequences
-prop <- df_vac$people_fully_vaccinated/df_vac$total_vaccinations
-```
-
-
-a.	Fit trendlines to the data (similar to covariants.org) - lookup options for doing this in plot_ly or ggplot2 (perhaps the "linetype" parameter for the "plot_ly" function?)
-
-```{r}
-plot_ly(data = df, x=~prop, y=~frequency, color=~location) # ,  linetype = ~ 
-```
-
-
+<div id='id4' />
 # GAM MODELS
 
 ## 1. example with data from Spain
@@ -274,19 +238,17 @@ gam.check(model1)
 ```
 
 
-
-
-
 # Combine plots of the GAM model and raw data points (this will help check the fit for the curves which appeared to be shifted downwards UK (0.01) and Spain (0.05)
 
 Check country names for merging datasets
 Generate two lists of country names, from the vaccinations and variants dataframes
 Remove all countries which are present in both lists
 Look at lists to see which countries are present in both dataframes but with different names eg United States vs USA
-Rename these countries in one the dataframes so that they're the same
+
 Remerge the dataframes (you should then expect to see more rows in the merged dataframe)
 
-Cambiamos los nombres en los diferentes df para que coincidan (USA,R.checa)
+
+Rename these countries in one the dataframes so that they're the same (USA,R.checa)
 
 ```{r}
 df_cov[df_cov$location=="USA",]$location <- "United States"
@@ -296,11 +258,9 @@ df_cov[df_cov$location=="USA",]$location <- "United States"
 df_cov[df_cov$location=="Czech Republic",]$location <- "Czechia"
 ```
 
-
 ```{r}
 df_cov[df_cov$location=="Sint Maarten",]$location <- "Sint Maarten (Dutch part)"
 ```
-
 
 ```{r}
 unique(df_cov$location)
@@ -620,7 +580,7 @@ plot(modelo2)
 summary(modelo2)
 ```
 
-24-Jan-2022
+24-Jan-2022(should I remove this??)
 
 
 ```{r}
