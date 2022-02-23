@@ -1,0 +1,12 @@
+---
+title: "Vacinne roll out affects on variant frequency"
+author: "Cindy Catherine Orbegoso Barrantes"
+date: "23/02/2022"
+output: html_document
+---
+
+```{r}
+source('R/helper.R')
+json_path <- 'S.E484_data2.json'
+```
+
