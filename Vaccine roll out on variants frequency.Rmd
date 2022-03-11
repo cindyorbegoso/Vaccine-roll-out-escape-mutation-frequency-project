@@ -7,6 +7,88 @@ output: html_document
 
 ```{r}
 source('R/helper.R')
-json_path <- 'S.E484_data2.json'
+json_path <- 'S.E484_data.json'
+df_cov<-json_to_df(json_path)
+df_cov <- bind_rows(data, .id = 'location')
 ```
+
+
+```{r}
+df_vac <- read.csv("vaccinations.csv")
+names(df_vac)[names(df_vac) == 'date'] <- 'week'
+```
+
+We merged both data frames by the columns Locations and week.
+
+```{r}
+library(dplyr)
+df <- inner_join(x = df_cov, y = df_vac, by= c("location","week"))
+```
+
+```{r}
+source('R/helper.R')
+df_final <-df_reorganise(df_cov,df_vac)
+```
+
+
+```{r}
+Fechas <-as.Date(df_final$week, tryFormats = "%Y-%m-%d")
+decimal_date(Fechas)
+df_final$Time <- lubridate::decimal_date(Fechas)
+```
+
+GAM models
+
+# Create a function to generate the GAM plot for any country
+
+```{r}
+
+# Single country well
+df <- filtrado_df(df_final, 'Spain')
+model <- gam(frequency ~ Time + s(people_vaccinated_per_hundred, by = Time), data = df)
+
+model_p <- tidymv::predict_gam(model)
+df <- bind_rows(df, model_p) 
+
+
+
+plot(model, shade = TRUE, pages = 1, scale = 0)
+
+df %>%
+  ggplot2::ggplot(ggplot2::aes(people_vaccinated_per_hundred, fit, color=location)) +
+  ggplot2::geom_point(ggplot2::aes(people_vaccinated_per_hundred,frequency, color=location)) +
+  tidymv::geom_smooth_ci()+
+  ggplot2::theme_minimal() + 
+  ggplot2::labs(x = "People Vaccinated Per Hundred", y = "Frequency of Variant S.E484")
+```
+
+
+Fit a GAM model for all countries, predicting variant frequency using a tensor product of time and proportion vaccinated using a location (country) as a covariante
+
+```{r}
+
+# df should be a dataframe containing the vaccination + variant data for all countries you want to analyse
+
+df <- df_final
+
+countries <- unique(df_final$location)[1:10]
+countries
+
+df <- subset(df, location %in% countries)
+
+
+df$location <- as.factor(df$location)
+
+
+modelo2 <- gam(frequency ~ location + te(Time, by=location), data = df, family=betar(link='logit'))
+
+
+plot(modelo2)
+
+```
+
+
+
+
+
 
